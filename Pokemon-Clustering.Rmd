@@ -1,0 +1,485 @@
+---
+title: "CENG574 - Statistical Data Analysis"
+author: "Team Rocket - Berke Ates Aytekin & Uygar Yasar"
+date: "04 01 2022"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Assignment 7 - Dataset Analysis Preliminary Work
+
+## Introduction
+
+In this report; first, we will work with different methods used to express datasets that we express with multidimensional feature vectors as two-dimensional vectors without any loss of information. Refactoring the dataset to two dimensions provides us with great convenience, especially in visualization, since we can observe the cluster structures at a very high level and have information about the data. 
+
+Next, we will apply different clustering methods with different hyperparameters such as number of cluster, linkages, etc. to our dataset. We will compare the consistency of our interpretations of the clusters when we visualize them formed as a result of different projection methods with the actual clusters formed by clustering methods.
+
+And finally, by using some clustering evaluation and validation methods,we will evaluate how the cluster structures that we created as a result of the projection and clustering sections are the right choices for clustering our dataset, and we will present you the final version of the cluster structures in our dataset, with a better clustering algorithm and hyperparameters, if any. We will use external, internal, and relative criteria when making this validity assessment.
+
+## Data
+
+For the final report, we chose the dataset called **Pokemons with stats** from the Kaggle (https://www.kaggle.com/abcsds/pokemon).
+
+The dataset stores 800 Pokemons, including their name, first and second type, and basic stats: HP, Attack, Defense, Special Attack, Special Defense, and Speed. These statistics are derived from values used in Pokemon games. This dataset consists of 13 columns, 9 of which are numerical (integer), 3 are string and 1 is boolean variable.
+
+```{r}
+df = read.csv("Pokemon.csv")
+head(df)
+```
+
+Let's check for missing values.
+
+```{r}
+sum(is.na(df))
+```
+
+As you can see, there is no missing values.   
+Now, let's look at the summary of the data.
+
+```{r}
+summary(df)
+```
+
+Although there are 800 instances in the dataset, there are 721 different IDs because Pokemons, which are advanced versions of each other, are stored with the same ID.
+
+Finally, let's observe the correlation between the variables.
+
+```{r}
+numeric_df = df[sapply(df, is.numeric)]
+corr_matrix = cor(numeric_df)
+corr_matrix
+```
+
+```{r}
+library(corrplot)
+corrplot(corr_matrix)
+```
+
+
+In order to use categorical and boolean variables in projection and clustering methods, we applied one hot encoding to the dataset and obtained a dataset consisting entirely of numerical variables.
+
+```{r}
+library(caret)
+df_features = df[c(3,4,5,6,7,8,9,10,11,12,13)]
+dummy <- dummyVars(" ~ .", data=df_features)
+newdf <- data.frame(predict(dummy, newdata = df_features))
+head(newdf)
+```
+
+
+
+Let's just consider the numerical features excluding ID feature to make our data set suitable for PCA, MDS methods and clustering.
+
+```{r}
+numDF = df[c(5,6,7,8,9,10,11,12)]
+head(numDF,5)
+```
+
+## Methods and Code
+
+### PCA - Principal Component Analysis
+
+In this part, we used the video: https://www.youtube.com/watch?v=0Jp4gsfOLMs. **[1]**
+
+We first apply PCA to the dataset with the **prcomp()** function. Then, we visualize it according to the two principal components with the highest variation.
+
+```{r}
+pca = prcomp(numDF, scale=TRUE)
+plot(pca$x[,1], pca$x[,2], xlab="PC1", ylab="PC2", main="PCA")
+```
+
+Let's draw a **Scree Plot** to see how much variation each principal component contains.
+
+```{r}
+pca.var = pca$sdev^2
+pca.var.per = round(pca.var/sum(pca.var)*100,1)
+barplot(pca.var.per, main="Scree Plot", xlab="PC", ylab="Percent Variation")
+```
+
+It's important to use the **summary()** function to observe the Cumulative Proportion of Variance of principal components.
+
+```{r}
+summary(pca)
+```
+
+In order for the accumulated proportion to exceed 0.9, we must use 5 components.
+
+Let's create a more visually satisfying graph using the **ggplot** library.
+
+```{r}
+library(ggplot2)
+pca.data = data.frame(X=pca$x[,1], Y=pca$x[,2])
+ggplot(data=pca.data, aes(x=X, y=Y, label="+")) + geom_text() + xlab(paste("PCA1 - ", pca.var.per[1], "%", sep="")) + ylab(paste("PC2 - ", pca.var.per[2], "%", sep="")) + theme_bw() + ggtitle("PCA Graph")
+```
+
+Finally, let's examine which feature is used with which weight in the calculation of the two principal components we use in the visualization since the principal components are actually linear combinations of features.
+
+```{r}
+loading_scores = pca$rotation[,1]
+loading_scores = abs(loading_scores)
+ld_ranked = sort(loading_scores, decreasing = TRUE)
+pca$rotation[names(ld_ranked),1]
+```
+
+```{r}
+loading_scores2 = pca$rotation[,2]
+loading_scores2 = abs(loading_scores2)
+ld_ranked2 = sort(loading_scores2, decreasing = TRUE)
+pca$rotation[names(ld_ranked2),2]
+```
+
+### MDS - Multidimensional Scaling
+
+#### PCoA with Manhattan Distance
+
+In the following two parts, we used the video: https://www.youtube.com/watch?v=pGAUHhLYp5Q. **[2]**
+
+First, we will apply Classical MDS, also known as Principal Coordinate Analysis (PCoA or PCO). We avoid Euclidian distance as distance metric because we know that it would give the same result as PCA if we used it. Therefore we prefer Manhattan distance. We used the **cmdscale()** function for this. Then, we examined how much variation the first 5 elements had.
+
+```{r}
+dist.matrix = dist(scale(numDF, center=TRUE, scale=TRUE), method="manhattan")
+mds = cmdscale(dist.matrix, eig=TRUE, x.ret=TRUE)
+mds.var.per = round(mds$eig/sum(mds$eig)*100,1)
+mds.var.per[1:5]
+```
+
+In order for the accumulated proportion to exceed 0.9, we must use 4 components.
+
+Here is the distribution of the data according to the MDS1 and MDS2 after the Principal Coordinate Analysis with Manhattan distance.
+
+```{r}
+mds.values = mds$points
+mds.data = data.frame(X=mds.values[,1], Y=mds.values[,2])
+ggplot(data=mds.data, aes(x=X,y=Y, label="+")) + geom_text() + theme_bw() + xlab(paste("MDS1 - ", mds.var.per[1], "%", sep="")) + ylab(paste("MDS2 - ", mds.var.per[2], "%", sep="")) + ggtitle("MDS Plot Using Manhattan Distance")
+```
+
+#### PCoA with avg(logFC) Distance
+
+We saw this method in the video of the Youtube channel named **StatQuest with Josh Starmer** (https://www.youtube.com/watch?v=pGAUHhLYp5Q). Thanks to this method, there was a large increase in the variation of the first two components. Since we needed this increase, we thought it appropriate to try this method. But since there is no such distance method in the dist() function, we had to create these values manually. For this, we created an matrix filled with 0 and then filled its lower triangle.
+
+```{r}
+log2.numDF = log2(numDF)
+log2.dist = matrix(0, nrow=nrow(log2.numDF), ncol=nrow(log2.numDF))
+
+```
+
+We completed the analysis by applying the same procedures as the previous method.
+
+```{r}
+pco = cmdscale(as.dist(log2.dist), eig=TRUE, x.ret=TRUE)
+pco.var.per = round(pco$eig/sum(pco$eig)*100,1)
+pco.var.per[1:10]
+```
+
+In order for the accumulated proportion to exceed 0.9, we must use 4 components.
+
+
+#### Kruskal's Non-metric Multidimensional Scaling
+
+We couldn't find as many resources on implementing this method as others, so our analysis was a bit more limited. We used the R documentation while writing this code. **[3]**
+
+However, we ran into a problem in implementing this function. Instances with a distance of zero and negative value were preventing the function from working by causing an error. Since we used Euclidean distance, it was impossible for the distance between two samples to be negative. Therefore, we suspected that these distances were zero. When we examined the samples that were said to have a zero distance between them in the original **numDF** data frame, we noticed that they were duplicates by deleting the non-numeric columns. That's why we removed the duplicate values before applying this method.
+
+```{r}
+library(MASS)
+notDup = numDF[!duplicated(numDF),]
+dist2 = dist(scale(notDup, center=TRUE, scale=TRUE), method="euclidian")
+iso = isoMDS(dist2, y=cmdscale(dist2,2), k=2, maxit=20, p=2)
+```
+
+Even though I set the maximum number of iterations to 20, isoMDS() converged to 17.81 between 10th and 15th iterations. This is quite a large value, much smaller would be better for the MDS of the dataset; however, in the above analyzes we have seen that the dataset does not perform very well in multidimensional scaling.
+
+```{r}
+iso.values = iso$points
+iso.data = data.frame(X=iso.values[,1], Y=iso.values[,2])
+ggplot(data=iso.data, aes(x=X,y=Y, label="+")) + geom_text() + theme_bw() + xlab(paste("ISO1")) + ylab(paste("ISO2")) + ggtitle("Non-metric MDS")
+```
+
+### Hierarchical Clustering
+
+For clustering part, first, we will apply the hierarchical clustering to the dataset. While doing this, we will use different linkage methods. Let's start with a **single-link** first.
+
+For this stage, we first scaled our dataset. We created a distance matrix **distances** using Euclidean distance and we hierarchically clustered the dataset using this matrix and the **hclust()** function. You can see the dendogram formed as a result below.
+
+```{r}
+scaledNumDF = scale(numDF)
+distances = dist(scaledNumDF, method="euclidian")
+hierClustMin = hclust(distances, method="single")
+plot(hierClustMin, main="Hierarchical Clustering with Simple Link")
+```
+
+As stated in the course materials, single-link hierarchical clustering is very sensitive to outliers and noise. As can be seen from the graphs we drew in the PCA and MDS parts, although the samples in the dataset form a clustered structure, they also take up too much space outside of these clusters. This shows that our dataset actually includes outlier values. Since the dendogram is too cramped and complex to observe with the naked eye, we do not want to focus on this method any more and we move on to the next linkage method.
+
+Next, we implemented hierarchical clustering with **complete-linkage**.
+
+```{r}
+hierClustMax = hclust(distances, method="complete")
+plot(hierClustMax, main="Hierarchical Clustering with Complete Link")
+```
+
+In the graphs we drew in the PCA and MDS sections, we observed that there were 3 to 5 clusters in the dataset. Looking at this dendogram, it seems appropriate to choose 5 as the number of clusters. One of these clusters will consist of the sample at index **231**. In this case, we can say that this example is a stand-alone outlier cluster. 
+
+Let's see how our dataset looks when we divide it into 5 clusters. We used the **factoextra** library for this.
+
+```{r}
+library(factoextra)
+hierarchicalClusters = cutree(hierClustMax, k=5)
+fviz_cluster(list(data=numDF, cluster=hierarchicalClusters))
+```
+
+In the course materials, it was said that there is a bias towards the globular cluster in full-link hierarchical clustering, and that is why large clusters are divided. It is possible to see this situation in the clustering in the figure. There is very high overlap between clusters. This may be related to the fact that a multidimensional feature vector loses information when reducing to two dimensions, but it is still unsatisfactory in terms of such a visual result.
+
+Afterwards, we implemented hierarchical clustering with **group average**.
+
+```{r}
+hierClustAvg = hclust(distances, method="average")
+plot(hierClustAvg, main="Hierarchical Clustering with Group Average")
+```
+
+Just like in the simple-link, the dendogram of the group average method is not very suitable for choosing the number of clusters. Therefore, we skip this method as well.
+
+Finally, we implemented hierarchical clustering with **Ward's method**.
+
+```{r}
+hierClustWard = hclust(distances, method="ward.D2")
+plot(hierClustWard, main="Hierarchical Clustering with Ward's Method")
+```
+
+The dendogram of the group average gives us a very clear result compared to the previous 3 dendograms. Therefore, we would like to focus on this dendogram rather than others. As we mentioned before, we observed that it would be appropriate to choose a cluster number between 3 and 5 in our graphs in the PCA and MDS sections. Therefore, let's observe these two values in this clustering method.
+
+```{r}
+plot(hierClustWard, main="Hierarchical Clustering with Ward's Method")
+rect.hclust(hierClustWard, k=3, border = 2:4)
+```
+
+```{r}
+hierarchicalClusters2 = cutree(hierClustWard, k=3)
+tapply(numDF$Total, hierarchicalClusters2, mean)
+```
+
+Since the feature named *Total* is the sum of the numeric values in all the other features except the feature named *Generation*, I thought *Total* feature would give information about the examples in a very superficial way. Therefore, I looked at the mean of the *Total* feature in each cluster. In this way, I think that the samples in the dataset are divided into clusters of "weak", "moderate" and "strong" Pokemons as the strengths in the game scores.
+
+Let's visualize these clusters.
+
+```{r}
+fviz_cluster(list(data=numDF, cluster=hierarchicalClusters2))
+```
+
+There is still a large amount of overlap in the clusters, but it is a more acceptable result than the previous clusters.
+
+Let's repeat the same process with 5 clusters.
+
+```{r}
+plot(hierClustWard, main="Hierarchical Clustering with Ward's Method")
+rect.hclust(hierClustWard, k=5, border = 2:6)
+```
+
+```{r}
+hierarchicalClusters3 = cutree(hierClustWard, k=5)
+fviz_cluster(list(data=numDF, cluster=hierarchicalClusters3))
+```
+
+Although it is a representation that shows only 60.3% of the variation of the dataset when reduced to two dimensions, such an overlapped clustering is unfortunately not useful for having an idea about the data.
+
+### K-means Clustering
+
+Before moving on to the k-means clustering method, let's first draw an **elbow plot** to choose an appropriate *k* value and see what the *wss* value is in each k number.
+
+```{r}
+fviz_nbclust(scaledNumDF, kmeans, method="wss") + labs(subtitle = "Elbow Plot")
+```
+
+As can be seen from the plot, the break point in the elbow method occurs at the point **k=2**. For this reason, we will start from 2 to try the number of clusters and continue until 6.
+
+```{r}
+set.seed(2021)
+kmeansCluster2 = kmeans(numDF, 2, nstart = 5)
+fviz_cluster(list(data=numDF, cluster=kmeansCluster2$cluster))
+```
+
+Although the clustering does a pretty good job, we think clustering the data in 2 clusters will create an insufficient number of classes for *Pokemon segmentation*.
+
+Let's change the initialization and see how it will affect clustering.
+
+```{r}
+kmeansCluster2_2 = kmeans(numDF, 2, nstart = 25)
+fviz_cluster(list(data=numDF, cluster=kmeansCluster2_2$cluster))
+```
+
+When we changed the initialization, we saw that there were very small changes at the surface where the clusters touched each other.
+
+Let's change the cluster number to 3 and see what was changed.
+
+```{r}
+kmeansCluster3 = kmeans(numDF, 3, nstart = 5)
+fviz_cluster(list(data=numDF, cluster=kmeansCluster3$cluster))
+```
+
+We can say that the results are much better understandable than hierarchical clusters.
+
+```{r}
+kmeansCluster3_2 = kmeans(numDF, 3, nstart = 35)
+fviz_cluster(list(data=numDF, cluster=kmeansCluster3_2$cluster))
+```
+
+We changed the initialization once again and we could see almost no difference. Therefore, we stop changing the initializations and only examine the effect of the number of clusters on clustering.
+
+Let's make cluster number 4.
+
+```{r}
+kmeansCluster4 = kmeans(numDF, 4, nstart = 5)
+fviz_cluster(list(data=numDF, cluster=kmeansCluster4$cluster))
+```
+
+Let's try k=5.
+
+```{r}
+kmeansCluster5 = kmeans(numDF, 5, nstart = 25)
+fviz_cluster(list(data=numDF, cluster=kmeansCluster5$cluster))
+```
+
+Lastly, we want to try k=6, since we think that the rightmost cluster in the figure should also be divided into two clusters.
+
+```{r}
+kmeansCluster6 = kmeans(numDF, 6, nstart = 25)
+fviz_cluster(list(data=numDF, cluster=kmeansCluster6$cluster))
+```
+
+k means clustering did a pretty good job on visualization. Although the most appropriate k value is 2 according to the elbow method, we can work with more clusters.
+
+### Cluster Validation
+
+In the previous part, we could say that the most appropriate choice was to apply k-means clustering and choose the k value of 6. We will now compare this decision with different clustering validation methods and decide on the cluster structure of our dataset with calculations that are more reliable than the human eye.
+
+Although different indexes such as internal, external and relative are specified in this topic in the course materials, we could not find such a clear distinction in R functions and packages. That is why we thought it appropriate to apply some of these methods and metrics at the same time.
+
+We used the **clValid** library to find the internal consistency values and stability measures. Since we use hierarchical and k-means clustering algorithms and we usually change the number of clusters between 3 and 6, I called the clValid() function with parameters according to these values.
+
+```{r}
+library(clValid)
+clusterMethods = c("hierarchical", "kmeans")
+internal = clValid(numDF, nClust = 3:6, clMethods = clusterMethods, maxitems = 1000, validation = "internal")
+summary(internal)
+```
+
+Connectivity, Dunn and Silhouette values obtained according to the combinations of clustering methods with different cluster numbers are as above. According to the connectivity and dunn metrics, as you can see, the 3-cluster hierarchical clustering method gives the best result, while the most appropriate clustering algorithm according to the silhouette metric is k-means clustering with k=3.
+
+```{r}
+plot(internal)
+```
+
+Now let's examine the stability measures by changing the *validation* parameter of the clValid() function.
+
+```{r}
+stab = clValid(numDF, nClust = 3:6, clMethods = clusterMethods, maxitems = 1000, validation = "stability")
+summary(stab)
+```
+
+If we look at the optimal combinations according to the stability criteria, we see that the k-means cluster method consisting of 3 and 6 clusters is in the majority.
+
+## Results
+
+We summarize the result of the calculations with different clustering algorithms and cluster numbers.
+
+```{r}
+vals = c("internal", "stability")
+totalSummary = clValid(numDF, nClust = 3:6, clMethods = clusterMethods, maxitems = 1000, validation = vals)
+summary(totalSummary)
+```
+
+As you can see in the summary above, 3-cluster hierarchical clustering and 3 and 6-cluster k-means clustering come to the fore among the most optimal combinations. After making a comparison between the scores obtained in the metrics where these combinations are not the most optimal, we decided that the best choice for clustering my dataset is the k-means clustering method with k=3. Therefore, the most optimal clustering is as follows.
+
+```{r}
+fviz_cluster(list(data=numDF, cluster=kmeansCluster3$cluster), main = "K-means Clustering when k = 3")
+```
+
+## Analysis and Evaluation of Results
+
+In the visualizations we made in the PCA and MDS sections, we obtained very close graphs especially in terms of clusters, except for one. In the MDS we performed with avg(logFC), the resulting graph was slightly different from the others. Since we use a two-dimensional plane in all these visualizations, we used the first two elements with the highest variation, but this is not the right approach if we leave the visualization part aside. As stated in the lecture slides, the number of these components (k) should be chosen according to the cumulative proportion of variation ratio exceeding 0.9. Therefore, although we choose the method that has the highest total variation in the first two elements as a result of this report and use its graph to get an idea about clustering, the actual distribution may differ from this. However, many sources say that even when the variation proportions are close to each other and the cumulative proportion of variance of the first two elements does not exceed 0.9, the visualization made by considering the first two elements gives a result close to the real clusters.
+
+Although hierarchical clustering methods did not give good results, the clusters I created with k-means clustering were satisfactory. However, when we look at the x and y axes of the resulting graphs, the fact that the total variation represented in the graph is 60.3% prevents me from having definite ideas about the entire dataset.
+
+```{r}
+pco.var.per[1] + pco.var.per[2]
+```
+
+In the face of this situation, a solution came to our mind. In one of the previous assignments, Projection of Data, we learned how to reduce our multidimensional data to a smaller size. In fact, in the Principal Coordinate Analysis we applied with avg(logFC) distance metric, we reached a 71.4% variation in the first two dimensions. Therefore, we want to see how the k-means clustering method will perform clustering in my projected dataset, where we have reduced the number of dimensions.
+
+
+## Further Methods
+
+## Density based clustering with DBSCAN algorithm
+
+The algorithm works density based, according to the given radius and the epsilon value. To find the most appropriate epsilon value, plotting the sorted distances of every point with the second closest neighbor can be helpful in this case.
+
+```{r}
+library("factoextra")
+numDF <- as.matrix(numDF)
+dbscan::kNNdistplot(numDF, k =  2)
+abline(h = 55, lty = 2)
+```
+The elbow point gives the most appropriate epsilon value. For this dataset it is around 55.
+
+```{r}
+set.seed(10000)
+res.db <- dbscan::dbscan(numDF,55, 2)
+fviz_cluster(res.db, numDF, geom = "point")
+```
+
+Black points are outliers. By looking at relatively high recommended epsilon value even small minPts used, it can be said that density based algorithms are not efficient way to determine clusters. It is not because the data set has a lot of dimensions and density varies a lot.
+
+## TSNE 
+
+```{r}
+library(ggplot2)
+library(tsne)
+plotted = tsne(numDF, initial_config = NULL, k = 2, initial_dims = 30, perplexity = 30,
+     max_iter = 1000, min_cost = 0, epoch_callback = NULL, whiten = TRUE,
+     epoch=100)
+plot(plotted)
+
+```
+Perplexity should be between 5-50 in that method and each iteration changes the point locations. Even the plot is close when the high number of iterations applied this method is difficult to interpret. 1000 iterations can or can not be enough to get the projection stable. By looking at the error rates in each 100 iterations it can be said that around 500 iterations makes the projection stable enough.
+
+```{r}
+library(ggplot2)
+library(tsne)
+plotted = tsne(numDF, initial_config = NULL, k = 2, initial_dims = 30, perplexity = 30,
+     max_iter = 2000, min_cost = 0, epoch_callback = NULL, whiten = TRUE,
+     epoch=100)
+plot(plotted)
+
+```
+By looking at both plots there is no huge difference so stability is guaranteed. However, 10 iteration is not stable as it can be seen.
+
+```{r}
+library(ggplot2)
+library(tsne)
+plotted = tsne(numDF, initial_config = NULL, k = 2, initial_dims = 30, perplexity = 30,
+     max_iter = 10, min_cost = 0, epoch_callback = NULL, whiten = TRUE,
+     epoch=100)
+plot(plotted)
+```
+
+
+
+## Discussion, Expectations, and Perspectives
+
+As a result of the projection, clustering and validation methods we have used so far, we have seen that the most appropriate algorithm and cluster number combination to cluster our dataset is k-means clustering and 3 clusters. Although the new clustering algorithm we will use in the future may result in a different clustering structure, we think that the best number of clusters will stil be 3 clusters, because while examining the validity results, we saw that using 3 clusters for both hierarchical and k-means clustering methods is the majority.
+
+In addition, if the projection method we will use contains a variation of more than 71.4% in the first two dimensions, we plan to apply the most appropriate clustering method and number to the dataset with reduced dimensions thanks to this projection method.
+
+To summarize, we think that after our final work, there will still be **3** clusters in the 'Pokemon with stats' dataset.
+
+## References
+
+**[1]** StatQuest with Jost Starmer. (2017,11,7). *StatQuest: PCA in R*[Video].Youtube. URL https://www.youtube.com/watch?v=0Jp4gsfOLMs. 
+
+**[2]** StatQuest with Jost Starmer. (2017,12,19). *StatQuest: MDS and PCoA in R*[Video].Youtube. URL https://www.youtube.com/watch?v=pGAUHhLYp5Q.
+
+**[3]** https://stat.ethz.ch/R-manual/R-devel/library/MASS/html/isoMDS.html
